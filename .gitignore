@@ -3,4 +3,6 @@ node_modules
 .vercel
 test_tts.mp3
 test_voices.py
-android/
+android/app/build/
+android/.gradle/
+android/capacitor-cordova-android-plugins/
