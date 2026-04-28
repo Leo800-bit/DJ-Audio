@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>NearEar · 深夜电台</title>
+<style>
+/* ── Reset & Variables ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --safeBottom:0px;
+  --accent:#ff6b6b;--accentGlow:rgba(255,107,107,0.25);
+  --surface:#111;--surfaceAlt:#0d0d0d;
+  --text:#eee;--text2:#999;--text3:#555;
+  --border:#1e1e1e;--borderFocus:#333;
+  --bubUser:rgba(255,107,107,0.12);--bubUserText:#ffcccc;
+  --bubDJ:#1a1a1a;--bubDJText:#ddd;
+  --playerBg:#0a0a0a;
+}
+:root.light{
+  --accent:#e55050;--accentGlow:rgba(229,80,80,0.15);
+  --surface:#fff;--surfaceAlt:#fafafa;
+  --text:#1a1a1a;--text2:#777;--text3:#bbb;
+  --border:#e5e5e5;--borderFocus:#ccc;
+  --bubUser:rgba(229,80,80,0.08);--bubUserText:#8b1a1a;
+  --bubDJ:#f5f5f5;--bubDJText:#333;
+  --playerBg:#f0f0f0;
+}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  background:var(--surface);color:var(--text);
+  transition:background 0.6s ease,color 0.6s ease;
+}
+
+/* ── NowPlaying mini bar ── */
+.now-playing{
+  position:fixed;top:0;left:0;right:0;z-index:60;
+  height:52px;padding:6px 12px;
+  background:var(--surfaceAlt);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;
+  transition:background 0.6s ease;
+}
+.np-cover{width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--border)}
+.np-info{flex:1;min-width:0;overflow:hidden}
+.np-title{font-size:0.78rem;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np-artist{font-size:0.65rem;color:var(--text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np-status{font-size:0.6rem;color:var(--accent);margin-top:1px}
+.np-wave{display:flex;align-items:flex-end;gap:1.5px;height:20px;opacity:0.2;flex-shrink:0}
+.np-wave .w{width:2px;border-radius:1px;background:var(--accent);transition:height 0.12s}
+.np-play{background:none;border:none;color:var(--text);cursor:pointer;padding:4px;flex-shrink:0;display:flex;align-items:center}
+.np-play svg{width:20px;height:20px}
+.np-speaker{background:none;border:none;color:var(--accent);cursor:pointer;padding:4px;flex-shrink:0;display:flex;align-items:center;font-size:0.7rem;gap:2px;opacity:0}
+
+/* ── Main scroll area ── */
+.main-scroll{
+  position:fixed;top:52px;bottom:56px;left:0;right:0;
+  overflow-y:auto;overflow-x:hidden;
+  padding:12px 10px 20px;
+  scroll-behavior:smooth;
+  -webkit-overflow-scrolling:touch;
+}
+.main-scroll::-webkit-scrollbar{width:0}
+
+/* ── Player Card ── */
+.player-card{
+  background:var(--playerBg);border-radius:20px;padding:20px 16px 16px;
+  margin-bottom:16px;border:1px solid var(--border);
+  transition:background 0.6s ease, border-color 0.6s;
+}
+#cover-hero-wrapper{position:relative;width:140px;height:140px;margin:0 auto 14px;border-radius:14px;overflow:hidden;background:var(--border)}
+.cover-hero{width:100%;height:100%;object-fit:cover;display:block}
+.cover-hero-placeholder{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text3)}
+.progress-wrap{height:3px;background:var(--border);border-radius:2px;margin:10px 0;overflow:hidden}
+.progress-fill{height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width 0.1s linear}
+.time-row{display:flex;justify-content:space-between;font-size:0.6rem;color:var(--text3);margin-bottom:10px}
+.controls-row{display:flex;justify-content:center;align-items:center;gap:20px}
+.ctrl{background:none;border:none;color:var(--text);cursor:pointer;padding:6px;display:flex;align-items:center}
+.ctrl svg{width:22px;height:22px}
+.ctrl.play{background:var(--accent);border-radius:50%;padding:10px;color:#fff}
+.ctrl.play svg{width:20px;height:20px}
+.source-badge{font-size:0.55rem;color:var(--text3);text-align:center;margin-top:6px}
+
+/* ── Chat bubbles ── */
+.chat-section{display:flex;flex-direction:column;gap:8px}
+.bubble{
+  max-width:85%;padding:10px 14px;border-radius:16px;
+  font-size:0.82rem;font-weight:350;line-height:1.6;letter-spacing:0.005em;
+  word-break:break-word;animation:bub 0.4s cubic-bezier(0.16,1,0.3,1) both;
+  transition:transform 0.22s cubic-bezier(0.16,1,0.3,1), box-shadow 0.22s ease;
+}
+@keyframes bub{ from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+.bubble:hover{ transform:translateY(-1.5px) scale(1.01); }
+.bub-user{
+  align-self:flex-end; background:var(--bubUser); color:var(--bubUserText);
+  border-bottom-right-radius:6px;
+}
+.bub-dj{
+  align-self:flex-start; background:var(--bubDJ); color:var(--bubDJText);
+  border:1px solid var(--border); border-bottom-left-radius:6px;
+}
+.bub-dj.speaking{ border-color:var(--accent); box-shadow:0 0 12px var(--accentGlow) }
+.typing{ align-self:flex-start; display:flex; gap:3px; padding:10px 14px; }
+.typing span{ width:5px;height:5px;border-radius:50%;background:var(--text3);animation:tb 0.7s ease-in-out infinite; }
+.typing span:nth-child(2){animation-delay:0.1s} .typing span:nth-child(3){animation-delay:0.2s}
+@keyframes tb{ 0%,60%,100%{transform:translateY(0);opacity:0.3} 30%{transform:translateY(-5px);opacity:1} }
+
+/* ── Bottom input bar ── */
+.input-bar{
+  position:fixed; bottom:0; left:0; right:0; z-index:50;
+  background:var(--surfaceAlt); backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px);
+  border-top:1px solid var(--border);
+  padding:8px 10px; padding-bottom:max(8px, var(--safeBottom));
+  display:flex; gap:8px; align-items:center;
+  transition:background 0.6s ease;
+}
+.input-wrap{
+  flex:1; display:flex; align-items:center; gap:6px;
+  background:var(--surface); border:1px solid var(--border); border-radius:20px;
+  padding:4px 6px 4px 14px;
+  transition:border-color 0.25s, box-shadow 0.25s;
+}
+.input-wrap:focus-within{ border-color:var(--borderFocus); box-shadow:0 0 0 3px rgba(128,128,128,0.04); }
+#user-input{
+  flex:1; background:none; border:none; outline:none; padding:7px 0;
+  color:var(--text); font-size:0.84rem; font-family:inherit; letter-spacing:0.005em;
+}
+#user-input::placeholder{ color:var(--text3) }
+#user-input:disabled{ opacity:0.35 }
+.send-btn{ background:none; border:none; color:var(--text3); cursor:pointer; padding:5px 7px; border-radius:50%; display:flex; align-items:center; justify-content:center; transition:color 0.2s; flex-shrink:0; }
+.send-btn:active{ color:var(--accent) }
+.send-btn:disabled{ opacity:0.25 }
+.theme-btn{
+  background:none; border:1px solid var(--border); border-radius:999px;
+  padding:4px 6px; color:var(--text3); cursor:pointer; font-size:0.65rem;
+  display:flex; align-items:center; gap:3px; transition:all 0.25s; flex-shrink:0;
+}
+.theme-btn:active{ color:var(--text); border-color:var(--borderFocus) }
+
+/* Landscape tweak */
+@media (min-width: 600px){
+  .main-scroll{ max-width:420px; left:50%; transform:translateX(-50%) }
+  .input-bar{ padding-left:calc((100vw - 400px)/2); padding-right:calc((100vw - 400px)/2) }
+  .now-playing{ padding-left:calc((100vw - 400px)/2); padding-right:calc((100vw - 400px)/2) }
+}
+</style>
+</head>
+<body>
+
+<!-- ── NowPlaying mini bar ── -->
+<div class="now-playing" id="now-playing">
+  <img class="np-cover" id="np-cover" src="" alt="" style="display:none">
+  <div class="np-cover" id="np-placeholder" style="display:flex;align-items:center;justify-content:center;color:var(--text3)">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+  </div>
+  <div class="np-info">
+    <div class="np-title" id="np-title">NearEar</div>
+    <div class="np-artist" id="np-artist">等待点播</div>
+    <div class="np-status" id="np-status" style="display:none"></div>
+  </div>
+  <div class="np-wave" id="np-wave">
+    <div class="w" style="height:6px"></div><div class="w" style="height:12px"></div><div class="w" style="height:8px"></div><div class="w" style="height:16px"></div><div class="w" style="height:4px"></div>
+  </div>
+  <button class="np-speaker" id="btn-speaker" title="DJ 语音开关" style="opacity:0">🔇</button>
+  <button class="np-play" id="btn-play-mini" title="播放/暂停">
+    <svg id="ico-play-m" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    <svg id="ico-pause-m" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+  </button>
+</div>
+
+<!-- ── Scrollable main ── -->
+<div class="main-scroll" id="main-scroll">
+  <!-- Player Card -->
+  <div class="player-card">
+    <div id="cover-hero-wrapper">
+      <img id="cover-hero" class="cover-hero" src="" alt="" style="display:none">
+      <div class="cover-hero-placeholder" id="cover-hero-placeholder">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      </div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:0.95rem;font-weight:500;color:var(--text)" id="hero-title">等待你的点播</div>
+      <div style="font-size:0.72rem;color:var(--text2);margin-top:2px" id="hero-artist">告诉 Near 你想听什么</div>
+    </div>
+    <div class="source-badge" id="source-badge"></div>
+    <div class="progress-wrap"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="time-row"><span id="time-now">0:00</span><span id="time-end">0:00</span></div>
+    <div class="controls-row">
+      <button class="ctrl" id="btn-prev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+      <button class="ctrl play" id="btn-play"><svg id="ico-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg><svg id="ico-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+      <button class="ctrl" id="btn-next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+    </div>
+  </div>
+
+  <!-- Chat bubbles -->
+  <div class="chat-section" id="chat-section"></div>
+</div>
+
+<!-- ── Input bar (bottom) ── -->
+<div class="input-bar">
+  <button class="theme-btn" id="theme-btn"><span id="theme-ico">🌙</span></button>
+  <div class="input-wrap">
+    <input type="text" id="user-input" placeholder="说心情，或点歌…" maxlength="300" autocomplete="off" enterkeyhint="send">
+    <button class="send-btn" id="send-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    </button>
+  </div>
+</div>
+
+<audio id="audio-player" preload="auto"></audio>
+<audio id="audio-next" preload="auto"></audio>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const audio=$('audio-player'), audioNext=$('audio-next');
+const chatSection=$('chat-section'), userInput=$('user-input'), sendBtn=$('send-btn');
+const iPlay=$('ico-play'),iPause=$('ico-pause'),iPlayM=$('ico-play-m'),iPauseM=$('ico-pause-m');
+const coverHero=$('cover-hero'),coverPlace=$('cover-hero-placeholder');
+const heroTitle=$('hero-title'),heroArtist=$('hero-artist'),sourceBadge=$('source-badge');
+const timeNow=$('time-now'),timeEnd=$('time-end'),progressFill=$('progress-fill');
+const npCover=$('np-cover'),npPlace=$('np-placeholder'),npTitle=$('np-title'),npArtist=$('np-artist'),npStatus=$('np-status');
+const npWave=$('np-wave'),waveBars=npWave.querySelectorAll('.w');
+const btnSpeaker=$('btn-speaker');
+
+let chatHistory=[], isPlaying=false, waveInt=null, lastQuery=null, playedIds=[], curId=null, busy=false, dark=true;
+let ttsEnabled=true, ttsSpeaking=false, pendingMusic=null;
+
+// ── TTS Engine: Browser SpeechSynthesis (native, zero server dependency) ──
+const synth = window.speechSynthesis;
+let selectedVoiceURI = '';
+let selectedRate = 0.85;
+let selectedPitch = 0.9;
+let browserVoices = [];
+
+function loadBrowserVoices() {
+  browserVoices = synth.getVoices();
+  // Prefer zh-CN male voices, fallback to any Chinese voice
+  const zhVoices = browserVoices.filter(v => v.lang.startsWith('zh'));
+  // Try to find a good male voice
+  const preferred = zhVoices.find(v => v.lang==='zh-CN' && v.name.includes('Yun') && !v.name.includes('Xiaoxiao'))  // Microsoft Yunjian/Yunyang
+    || zhVoices.find(v => v.lang==='zh-CN' && !v.name.includes('Xiaoxiao') && !v.name.includes('Xiaoyi'))
+    || zhVoices[0];
+  if (preferred) selectedVoiceURI = preferred.voiceURI;
+}
+
+// Load voices initially and on change (Chrome loads them async)
+loadBrowserVoices();
+synth.onvoiceschanged = () => { loadBrowserVoices(); };
+
+// Speaker toggle button
+btnSpeaker.style.opacity = '1';
+btnSpeaker.textContent = '🔊';
+btnSpeaker.title = 'DJ 语音开关';
+btnSpeaker.addEventListener('click', () => {
+  ttsEnabled = !ttsEnabled;
+  if (!ttsEnabled) {
+    stopTTS();
+    btnSpeaker.textContent = '🔇';
+  } else {
+    btnSpeaker.textContent = '🔊';
+  }
+});
+
+function stopTTS() {
+  synth.cancel();
+  ttsSpeaking = false;
+  npStatus.style.display = 'none';
+  const bubs = chatSection.querySelectorAll('.bub-dj.speaking');
+  bubs.forEach(b => b.classList.remove('speaking'));
+}
+
+function speakDJText(text, onDone) {
+  if (!ttsEnabled || !text || typeof synth === 'undefined') {
+    if (onDone) onDone();
+    return;
+  }
+  // Highlight last DJ bubble
+  const bubs = chatSection.querySelectorAll('.bub-dj');
+  if (bubs.length > 0) bubs[bubs.length - 1].classList.add('speaking');
+
+  npStatus.style.display = '';
+  npStatus.textContent = 'DJ 正在说话… 🎙';
+  ttsSpeaking = true;
+
+  // Split long text into sentences for natural pacing
+  const sentences = text.split(/(?<=[。！？，、\n])/g).filter(s => s.trim());
+  let idx = 0;
+
+  function speakNext() {
+    if (idx >= sentences.length) {
+      // Done
+      ttsSpeaking = false;
+      npStatus.style.display = 'none';
+      const bs = chatSection.querySelectorAll('.bub-dj.speaking');
+      bs.forEach(b => b.classList.remove('speaking'));
+      if (onDone) onDone();
+      return;
+    }
+    const utt = new SpeechSynthesisUtterance(sentences[idx]);
+    idx++;
+
+    // Use selected voice
+    if (selectedVoiceURI) {
+      const v = browserVoices.find(vo => vo.voiceURI === selectedVoiceURI);
+      if (v) utt.voice = v;
+    }
+    utt.rate = selectedRate;
+    utt.pitch = selectedPitch;
+    utt.volume = 1;
+    utt.lang = 'zh-CN';
+
+    utt.onend = () => speakNext();
+    utt.onerror = (e) => {
+      console.warn('[TTS] utterance error:', e.error);
+      speakNext(); // skip failed chunk
+    };
+
+    try { synth.speak(utt); } catch (e) {
+      console.warn('[TTS] speak error:', e);
+      speakNext();
+    }
+  }
+
+  speakNext();
+}
+
+// ── Voice settings modal (mobile-visible) ──
+function buildVoiceModal() {
+  // Settings gear button in now-playing bar
+  const gearBtn = document.createElement('button');
+  gearBtn.id = 'btn-gear';
+  gearBtn.className = 'np-play';
+  gearBtn.style.cssText = 'font-size:0.75rem;';
+  gearBtn.innerHTML = '⚙️';
+  gearBtn.title = '语音设置';
+  btnSpeaker.insertAdjacentElement('afterend', gearBtn);
+
+  // Modal overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'voice-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.7);display:none;align-items:flex-end;justify-content:center;';
+  
+  const sheet = document.createElement('div');
+  sheet.id = 'voice-modal-sheet';
+  sheet.style.cssText = 'background:var(--surface);color:var(--text);width:100%;max-width:420px;border-radius:20px 20px 0 0;padding:20px 16px;padding-bottom:max(20px,calc(20px + var(--safeBottom)));transition:background 0.6s;max-height:75vh;overflow-y:auto;';
+  
+  sheet.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div style="font-weight:600;font-size:0.95rem;">🎤 语音设置 (浏览器内置)</div>
+      <button id="btn-close-modal" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:1.2rem;padding:4px 8px;">✕</button>
+    </div>
+    <div style="margin-bottom:14px;">
+      <div style="font-size:0.72rem;color:var(--text3);margin-bottom:6px;">选择 DJ 声音 (中文男声优先)</div>
+      <div id="voice-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+    </div>
+    <div style="margin-bottom:12px;">
+      <div style="font-size:0.72rem;color:var(--text3);margin-bottom:4px;">语速 <span id="rate-label">稍慢 (0.85)</span></div>
+      <input type="range" id="rate-slider" min="0.5" max="1.5" value="0.85" step="0.05" style="width:100%;accent-color:var(--accent);">
+    </div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:0.72rem;color:var(--text3);margin-bottom:4px;">音调 <span id="pitch-label">偏低 (0.9)</span></div>
+      <input type="range" id="pitch-slider" min="0.5" max="1.5" value="0.9" step="0.05" style="width:100%;accent-color:var(--accent);">
+    </div>
+    <button id="btn-test-voice" style="width:100%;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:0.85rem;cursor:pointer;">试听当前声音</button>
+  `;
+  
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+
+  // Build voice buttons
+  function renderVoiceChips() {
+    const voiceGroup = sheet.querySelector('#voice-btn-group');
+    voiceGroup.innerHTML = '';
+    const allVoices = synth.getVoices();
+    browserVoices = allVoices;
+    const zhVoices = allVoices.filter(v => v.lang.startsWith('zh'));
+    const displayVoices = zhVoices.length > 0 ? zhVoices : allVoices.slice(0, 12);
+
+    // If no voice selected yet, auto-pick
+    if (!selectedVoiceURI && displayVoices.length > 0) {
+      const pref = displayVoices.find(v => v.lang==='zh-CN' && !v.name.includes('Xiaoxiao'))
+        || displayVoices[0];
+      selectedVoiceURI = pref.voiceURI;
+    }
+
+    displayVoices.forEach(v => {
+      const chip = document.createElement('button');
+      chip.className = 'voice-chip';
+      chip.style.cssText = 'padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surfaceAlt);color:var(--text2);font-size:0.7rem;cursor:pointer;transition:all 0.2s;white-space:nowrap;';
+      chip.textContent = v.name.split(' ').slice(0,2).join(' ') + ' · ' + v.lang;
+      chip.title = v.name;
+      if (v.voiceURI === selectedVoiceURI) {
+        chip.style.borderColor = 'var(--accent)';
+        chip.style.color = 'var(--accent)';
+        chip.style.boxShadow = '0 0 8px var(--accentGlow)';
+      }
+      chip.addEventListener('click', () => {
+        selectedVoiceURI = v.voiceURI;
+        renderVoiceChips();
+      });
+      voiceGroup.appendChild(chip);
+    });
+  }
+  renderVoiceChips();
+  synth.onvoiceschanged = () => renderVoiceChips();
+
+  // Rate slider (0.5...1.5, default 0.85)
+  const rateSlider = sheet.querySelector('#rate-slider');
+  const rateLabel = sheet.querySelector('#rate-label');
+  rateSlider.addEventListener('input', () => {
+    const v = parseFloat(rateSlider.value);
+    selectedRate = v;
+    const desc = v < 0.7 ? '很慢' : v < 0.9 ? '稍慢' : v < 1.1 ? '正常' : '稍快';
+    rateLabel.textContent = desc + ' (' + v.toFixed(2) + ')';
+  });
+
+  // Pitch slider (0.5...1.5, default 0.9)
+  const pitchSlider = sheet.querySelector('#pitch-slider');
+  const pitchLabel = sheet.querySelector('#pitch-label');
+  pitchSlider.addEventListener('input', () => {
+    const v = parseFloat(pitchSlider.value);
+    selectedPitch = v;
+    const desc = v < 0.85 ? '低沉' : v < 0.95 ? '偏低' : v < 1.05 ? '正常' : '偏高';
+    pitchLabel.textContent = desc + ' (' + v.toFixed(2) + ')';
+  });
+
+  // Test button
+  sheet.querySelector('#btn-test-voice').addEventListener('click', () => {
+    stopTTS();
+    speakDJText('嗨，我是 Near，你的深夜电台 DJ。在这个安静的夜晚，让我陪你度过每一个温柔的瞬间。', () => {
+      npStatus.style.display = 'none';
+    });
+  });
+
+  // Toggle modal
+  gearBtn.addEventListener('click', () => {
+    overlay.style.display = 'flex';
+    setTimeout(() => { sheet.style.transform = 'translateY(0)'; renderVoiceChips(); }, 10);
+  });
+  
+  sheet.style.transform = 'translateY(100%)';
+  sheet.style.transition = 'transform 0.3s ease';
+  
+  const closeModal = () => {
+    sheet.style.transform = 'translateY(100%)';
+    setTimeout(() => { overlay.style.display = 'none'; stopTTS(); }, 300);
+    npStatus.style.display = 'none';
+  };
+  
+  sheet.querySelector('#btn-close-modal').addEventListener('click', closeModal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+  
+  gearBtn.style.opacity = '1';
+}
+setTimeout(buildVoiceModal, 400);
+
+// ── Helpers ──
+function fmt(s){ const m=Math.floor(s/60), sec=Math.floor(s%60); return `${m}:${String(sec).padStart(2,'0')}` }
+
+function startWave(){ npWave.style.opacity='0.7'; if(waveInt)clearInterval(waveInt); waveInt=setInterval(()=>{ waveBars.forEach(w=>{ w.style.height=(2+Math.random()*14)+'px' }) },100) }
+function stopWave(){ npWave.style.opacity='0.2'; if(waveInt){clearInterval(waveInt);waveInt=null}; waveBars.forEach(w=>{w.style.height='4px'}) }
+
+function updateProgress(cur,dur){
+  if(!dur||!isFinite(dur)||dur<=0){ progressFill.style.width='0%'; timeNow.textContent='0:00'; timeEnd.textContent='0:00'; return }
+  const p=Math.min(cur/dur,1); progressFill.style.width=(p*100)+'%';
+  timeNow.textContent=fmt(cur); timeEnd.textContent=fmt(dur);
+}
+
+function setPlayingUI(p){
+  isPlaying=p;
+  if(p){ iPlay.style.display='none';iPause.style.display='';iPlayM.style.display='none';iPauseM.style.display='';startWave() }
+  else{ iPlay.style.display='';iPause.style.display='none';iPlayM.style.display='';iPauseM.style.display='none';stopWave() }
+}
+
+function updateArtwork(m){
+  const a=m.artworkUrl||m.artworkUrl100||'';
+  if(a){ coverHero.src=a;coverHero.style.display='';coverPlace.style.display='none'; npCover.src=a;npCover.style.display='';npPlace.style.display='none' }
+  else{ coverHero.style.display='none';coverPlace.style.display=''; npCover.style.display='none';npPlace.style.display='' }
+  heroTitle.textContent=m.trackName||'未知歌曲';
+  heroArtist.textContent=m.artistName||'未知艺人';
+  npTitle.textContent=m.trackName||'未知歌曲';
+  npArtist.textContent=m.artistName||'未知艺人';
+  // Source badge
+  if(m.source==='archive') sourceBadge.textContent='🎵 全曲 · Internet Archive';
+  else if(m.source==='itunes') sourceBadge.textContent='🎧 30s 试听 · iTunes';
+  else sourceBadge.textContent='';
+}
+
+function playMusicDirect(m){
+  if(!m||!m.previewUrl) return;
+  if(m.trackId){ if(String(m.trackId)===String(curId)&&isPlaying)return; if(!playedIds.includes(String(m.trackId)))playedIds.push(String(m.trackId));curId=m.trackId }
+  updateArtwork(m);
+  audio.pause();audioNext.pause();audioNext.removeAttribute('src');
+  audio.src=m.previewUrl; audio.load();
+  audio.play().then(()=>setPlayingUI(true)).catch(()=>{});
+}
+
+// ── Core: DJ speaks, then music fades in (crossfade transition) ──
+let crossfadeTimer = null;
+
+function fadeInMusic(musicData, durationSec = 2.5) {
+  if (!musicData || !musicData.previewUrl) return;
+  updateArtwork(musicData);
+  audio.pause();
+  audio.src = musicData.previewUrl;
+  audio.volume = 0;
+  audio.load();
+
+  audio.play().then(() => {
+    setPlayingUI(true);
+    // Smooth volume ramp from 0 → 0.9 over durationSec
+    const steps = 20;
+    const interval = (durationSec * 1000) / steps;
+    const targetVol = 0.9;
+    let step = 0;
+
+    crossfadeTimer = setInterval(() => {
+      step++;
+      audio.volume = Math.min(targetVol, (step / steps) * targetVol);
+      if (step >= steps) {
+        clearInterval(crossfadeTimer);
+        crossfadeTimer = null;
+        audio.volume = targetVol;
+      }
+    }, interval);
+  }).catch(() => {});
+}
+
+function playWithIntro(djMessage, musicData){
+  if(!musicData || !musicData.previewUrl){
+    addBubble('dj', djMessage);
+    chatHistory.push({role:'assistant',content:djMessage});
+    return;
+  }
+  // Show DJ message bubble
+  addBubble('dj', djMessage);
+  chatHistory.push({role:'assistant',content:djMessage});
+
+  // First stop any music
+  audio.pause();
+  if (crossfadeTimer) { clearInterval(crossfadeTimer); crossfadeTimer = null; }
+
+  // Speak the DJ message, then crossfade into music
+  speakDJText(djMessage, () => {
+    // TTS done → fade in music gradually
+    npStatus.style.display = '';
+    npStatus.textContent = '🎶 音乐渐入中…';
+    fadeInMusic(musicData, 2.5);
+    // Hide status after fade completes
+    setTimeout(() => { npStatus.style.display = 'none'; }, 3000);
+  });
+}
+
+// ── Bubbles ──
+function addBubble(role,text){
+  const d=document.createElement('div'); d.className='bubble bub-'+role; d.textContent=text;
+  chatSection.appendChild(d);
+  const scroll=document.getElementById('main-scroll');
+  scroll.scrollTop=scroll.scrollHeight;
+}
+function addTyping(){
+  const d=document.createElement('div');d.className='typing';d.id='typing';
+  d.innerHTML='<span></span><span></span><span></span>';
+  chatSection.appendChild(d);
+  const scroll=document.getElementById('main-scroll');
+  scroll.scrollTop=scroll.scrollHeight;
+}
+function rmTyping(){ const e=$('typing'); if(e)e.remove() }
+
+// ── Audio events ──
+audio.addEventListener('play',()=>setPlayingUI(true));
+audio.addEventListener('pause',()=>{if(!audio.ended)setPlayingUI(false)});
+audio.addEventListener('ended',()=>{
+  setPlayingUI(false);
+  progressFill.style.width='0%';timeNow.textContent='0:00';
+  // Auto-play next song after a short delay
+  setTimeout(()=>fetchNextAndPlay(),2000);
+});
+audio.addEventListener('timeupdate',()=>{if(audio.duration&&isFinite(audio.duration))updateProgress(audio.currentTime,audio.duration)});
+audio.addEventListener('loadedmetadata',()=>updateProgress(0,audio.duration||0));
+audio.addEventListener('error',()=>{setPlayingUI(false);progressFill.style.width='0%'});
+
+$('btn-play').addEventListener('click',()=>{if(!audio.src)return;isPlaying?audio.pause():audio.play().catch(()=>{})});
+$('btn-play-mini').addEventListener('click',()=>{if(!audio.src)return;isPlaying?audio.pause():audio.play().catch(()=>{})});
+$('btn-next').addEventListener('click',()=>{stopTTS();audio.pause();audioNext.pause();audio.removeAttribute('src');audioNext.removeAttribute('src');setPlayingUI(false);progressFill.style.width='0%';fetchNextAndPlay()});
+$('btn-prev').addEventListener('click',()=>{if(audio.src&&audio.duration){audio.currentTime=0;audio.play().catch(()=>{})}});
+
+async function fetchNextAndPlay(){
+  try{
+    const r=await fetch('/api/next-song',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({previousQuery:lastQuery||'',excludeTrackIds:playedIds.slice(-15)})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d.music&&d.music.previewUrl) playMusicDirect(d.music);
+  }catch(e){}
+}
+
+function updateTheme(){
+  if(dark){ document.documentElement.classList.remove('light');document.documentElement.classList.add('dark');$('theme-ico').textContent='🌙' }
+  else{ document.documentElement.classList.add('light');document.documentElement.classList.remove('dark');$('theme-ico').textContent='☀️' }
+}
+$('theme-btn').addEventListener('click',()=>{dark=!dark;updateTheme()});
+
+// ── Send message ──
+async function sendMsg(){
+  if(busy)return; const t=userInput.value.trim(); if(!t)return;
+  busy=true; userInput.disabled=true; sendBtn.disabled=true; userInput.value=''; userInput.placeholder='…';
+  addBubble('user',t); chatHistory.push({role:'user',content:t}); addTyping();
+
+  // When user sends, stop any current TTS
+  stopTTS();
+
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:chatHistory})});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||e.details||'HTTP '+r.status) }
+    const d=await r.json();
+    const msg=d.message||'📡 信号波动…';
+    rmTyping();
+    if(d.searchQuery) lastQuery=d.searchQuery;
+    if(d.music&&d.music.previewUrl){
+      playWithIntro(msg, d.music);
+    }else{
+      addBubble('dj',msg); chatHistory.push({role:'assistant',content:msg});
+      // Speak non-music responses too
+      speakDJText(msg);
+    }
+  }catch(e){ rmTyping(); addBubble('dj','📡 信号波动，请稍后再试…'); chatHistory.pop(); progressFill.style.width='0%' }
+  finally{ busy=false; userInput.disabled=false; sendBtn.disabled=false; userInput.placeholder='说心情，或点歌…'; userInput.focus() }
+}
+
+userInput.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendMsg()}});
+sendBtn.addEventListener('click',sendMsg);
+
+// Init
+addBubble('dj','嗨，深夜未眠的朋友。我是 Near，你的专属电台 DJ 🎙 告诉我你的心情，或者直接点一首歌吧。');
+chatHistory.push({role:'assistant',content:'嗨，深夜未眠的朋友。我是 Near，你的专属电台 DJ 🎙 告诉我你的心情，或者直接点一首歌吧。'});
+updateTheme(); stopWave(); npWave.style.opacity='0.2';
+// Show speaker button
+setTimeout(()=>{ btnSpeaker.style.opacity='1'; btnSpeaker.textContent=ttsEnabled?'🔊':'🔇'; userInput.focus() },500);
+
+// PWA service worker
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}) }
+})();
+</script>
+</body>
+</html>
