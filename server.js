@@ -3,8 +3,11 @@ const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
 const path = require('path');
+const { MsEdgeTTS } = require('edge-tts-node');
 
 const app = express();
+const edgeTTS = new MsEdgeTTS({});
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -296,6 +299,104 @@ app.post('/api/next-song', async (req, res) => {
         res.status(500).json({ error: '获取下一首失败', details: err.message });
     }
 });
+
+// ==================== EDGE TTS ENDPOINT ====================
+app.post('/api/tts', async (req, res) => {
+    try {
+        const { text } = req.body;
+        if (!text) return res.status(400).json({ error: 'text 为必填项' });
+
+        console.log(`[TTS] "${text.slice(0, 50)}..."`);
+
+        // Use male voice zh-CN-YunyangNeural (warm, broadcaster-style)
+        // Fallback: zh-CN-YunjianNeural also male
+        const mp3Buffer = await edgeTTS.toBuffer(text, {
+            voice: 'zh-CN-YunyangNeural',
+            rate: '-15%',      // slightly slower for DJ style
+            pitch: '-3Hz',     // slightly deeper, warm tone
+        });
+
+        res.set({
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': mp3Buffer.length,
+            'Cache-Control': 'no-cache',
+        });
+        res.send(mp3Buffer);
+    } catch (err) {
+        console.error('[TTS] Error:', err.message);
+        // Try fallback voice
+        try {
+            const { text } = req.body;
+            const mp3Buffer = await edgeTTS.toBuffer(text, {
+                voice: 'zh-CN-YunjianNeural',
+                rate: '-15%',
+                pitch: '-3Hz',
+            });
+            res.set({
+                'Content-Type': 'audio/mpeg',
+                'Content-Length': mp3Buffer.length,
+                'Cache-Control': 'no-cache',
+            });
+            res.send(mp3Buffer);
+        } catch (e2) {
+            res.status(500).json({ error: 'TTS synthesis failed', details: err.message });
+        }
+    }
+});
+
+// ==================== FIXED MUSIC SEARCH ====================
+// Override searchMusicWithFallback to aggressively prefer Archive.org full songs
+const _originalSearchMusicWithFallback = searchMusicWithFallback;
+
+searchMusicWithFallback = async function (query) {
+    console.log(`[Search] Query: "${query}"`);
+
+    // Step 1: Try Archive.org with original query (full songs first!)
+    let results = await searchFullSongs(query, 8);
+    if (results.length > 0) {
+        console.log(`[Search] ✅ Archive full songs: ${results.length}`);
+        return results;
+    }
+
+    // Step 2: Try simplified/expanded queries on Archive
+    const simplified = query.replace(/[，,.\-!！？?—…"」』】）\)\s]+/g, ' ').trim();
+    if (simplified !== query && simplified.length > 1) {
+        results = await searchFullSongs(simplified, 8);
+        if (results.length > 0) {
+            console.log(`[Search] ✅ Archive (simplified): ${results.length}`);
+            return results;
+        }
+    }
+
+    // Step 3: Try genre/mood fallback on Archive first
+    for (const fb of FALLBACK_QUERIES) {
+        results = await searchFullSongs(fb, 3);
+        if (results.length > 0) {
+            console.log(`[Search] ✅ Archive fallback "${fb}": ${results.length}`);
+            return results;
+        }
+    }
+
+    // Step 4: Only fall to iTunes as absolute last resort
+    console.log(`[Search] ⚠️ Archive failed, trying iTunes...`);
+    results = await searchiTunes(query, 5);
+    if (results.length > 0) {
+        console.log(`[Search] ⚠️ iTunes 30s previews: ${results.length}`);
+        return results;
+    }
+
+    // Step 5: iTunes fallback queries
+    for (const fb of FALLBACK_QUERIES) {
+        results = await searchiTunes(fb, 5);
+        if (results.length > 0) {
+            console.log(`[Search] ⚠️ iTunes fallback "${fb}": ${results.length}`);
+            return results;
+        }
+    }
+
+    console.log(`[Search] ❌ No results found`);
+    return [];
+};
 
 if (require.main === module) {
     const PORT = process.env.PORT || 3000;

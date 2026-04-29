@@ -3,7 +3,7 @@
   "appName": "NearEar",
   "webDir": "public",
   "server": {
-    "url": "https://nearear.vercel.app",
+    "url": "https://near-ear.vercel.app",
     "cleartext": false,
     "allowNavigation": ["*"]
   },

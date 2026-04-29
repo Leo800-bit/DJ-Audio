@@ -215,6 +215,7 @@ body{
 
 <audio id="audio-player" preload="auto"></audio>
 <audio id="audio-next" preload="auto"></audio>
+<audio id="audio-tts" preload="auto"></audio>
 
 <script>
 (function(){
@@ -232,32 +233,15 @@ const btnSpeaker=$('btn-speaker');
 let chatHistory=[], isPlaying=false, waveInt=null, lastQuery=null, playedIds=[], curId=null, busy=false, dark=true;
 let ttsEnabled=true, ttsSpeaking=false, pendingMusic=null;
 
-// ── TTS Engine: Browser SpeechSynthesis (native, zero server dependency) ──
-const synth = window.speechSynthesis;
-let selectedVoiceURI = '';
-let selectedRate = 0.85;
-let selectedPitch = 0.9;
-let browserVoices = [];
-
-function loadBrowserVoices() {
-  browserVoices = synth.getVoices();
-  // Prefer zh-CN male voices, fallback to any Chinese voice
-  const zhVoices = browserVoices.filter(v => v.lang.startsWith('zh'));
-  // Try to find a good male voice
-  const preferred = zhVoices.find(v => v.lang==='zh-CN' && v.name.includes('Yun') && !v.name.includes('Xiaoxiao'))  // Microsoft Yunjian/Yunyang
-    || zhVoices.find(v => v.lang==='zh-CN' && !v.name.includes('Xiaoxiao') && !v.name.includes('Xiaoyi'))
-    || zhVoices[0];
-  if (preferred) selectedVoiceURI = preferred.voiceURI;
-}
-
-// Load voices initially and on change (Chrome loads them async)
-loadBrowserVoices();
-synth.onvoiceschanged = () => { loadBrowserVoices(); };
+// ── TTS Engine: Server-side Edge TTS (male voice zh-CN-YunyangNeural) ──
+const ttsAudio = $('audio-tts');
+let ttsQueue = [];
+let ttsPlaying = false;
 
 // Speaker toggle button
 btnSpeaker.style.opacity = '1';
 btnSpeaker.textContent = '🔊';
-btnSpeaker.title = 'DJ 语音开关';
+btnSpeaker.title = 'DJ 男声开关 (服务器端)';
 btnSpeaker.addEventListener('click', () => {
   ttsEnabled = !ttsEnabled;
   if (!ttsEnabled) {
@@ -269,15 +253,43 @@ btnSpeaker.addEventListener('click', () => {
 });
 
 function stopTTS() {
-  synth.cancel();
+  ttsAudio.pause();
+  ttsAudio.removeAttribute('src');
+  ttsQueue = [];
+  ttsPlaying = false;
   ttsSpeaking = false;
   npStatus.style.display = 'none';
   const bubs = chatSection.querySelectorAll('.bub-dj.speaking');
   bubs.forEach(b => b.classList.remove('speaking'));
 }
 
-function speakDJText(text, onDone) {
-  if (!ttsEnabled || !text || typeof synth === 'undefined') {
+function ttsPlayNext() {
+  if (ttsQueue.length === 0) {
+    ttsPlaying = false;
+    ttsSpeaking = false;
+    npStatus.style.display = 'none';
+    const bubs = chatSection.querySelectorAll('.bub-dj.speaking');
+    bubs.forEach(b => b.classList.remove('speaking'));
+    // Fire callback if any
+    const done = ttsQueue._onDone;
+    ttsQueue._onDone = null;
+    if (done) done();
+    return;
+  }
+  ttsPlaying = true;
+  npStatus.style.display = '';
+  npStatus.textContent = 'DJ 正在说话… 🎙';
+  const item = ttsQueue.shift();
+  ttsAudio.src = item;
+  ttsAudio.load();
+  ttsAudio.play().catch(() => { ttsPlayNext(); });
+}
+
+ttsAudio.addEventListener('ended', () => ttsPlayNext());
+ttsAudio.addEventListener('error', () => ttsPlayNext());
+
+async function speakDJText(text, onDone) {
+  if (!ttsEnabled || !text) {
     if (onDone) onDone();
     return;
   }
@@ -285,64 +297,40 @@ function speakDJText(text, onDone) {
   const bubs = chatSection.querySelectorAll('.bub-dj');
   if (bubs.length > 0) bubs[bubs.length - 1].classList.add('speaking');
 
-  npStatus.style.display = '';
-  npStatus.textContent = 'DJ 正在说话… 🎙';
   ttsSpeaking = true;
+  ttsQueue._onDone = onDone;
 
-  // Split long text into sentences for natural pacing
-  const sentences = text.split(/(?<=[。！？，、\n])/g).filter(s => s.trim());
-  let idx = 0;
-
-  function speakNext() {
-    if (idx >= sentences.length) {
-      // Done
-      ttsSpeaking = false;
-      npStatus.style.display = 'none';
-      const bs = chatSection.querySelectorAll('.bub-dj.speaking');
-      bs.forEach(b => b.classList.remove('speaking'));
-      if (onDone) onDone();
-      return;
-    }
-    const utt = new SpeechSynthesisUtterance(sentences[idx]);
-    idx++;
-
-    // Use selected voice
-    if (selectedVoiceURI) {
-      const v = browserVoices.find(vo => vo.voiceURI === selectedVoiceURI);
-      if (v) utt.voice = v;
-    }
-    utt.rate = selectedRate;
-    utt.pitch = selectedPitch;
-    utt.volume = 1;
-    utt.lang = 'zh-CN';
-
-    utt.onend = () => speakNext();
-    utt.onerror = (e) => {
-      console.warn('[TTS] utterance error:', e.error);
-      speakNext(); // skip failed chunk
-    };
-
-    try { synth.speak(utt); } catch (e) {
-      console.warn('[TTS] speak error:', e);
-      speakNext();
-    }
+  try {
+    const resp = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!resp.ok) throw new Error('TTS HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    ttsQueue.push(url);
+    if (!ttsPlaying) ttsPlayNext();
+  } catch (e) {
+    console.warn('[TTS] Server TTS failed:', e.message);
+    ttsSpeaking = false;
+    npStatus.style.display = 'none';
+    const bubs = chatSection.querySelectorAll('.bub-dj.speaking');
+    bubs.forEach(b => b.classList.remove('speaking'));
+    if (onDone) onDone();
   }
-
-  speakNext();
 }
 
-// ── Voice settings modal (mobile-visible) ──
+// ── Voice settings modal (server-side, simplified) ──
 function buildVoiceModal() {
-  // Settings gear button in now-playing bar
   const gearBtn = document.createElement('button');
   gearBtn.id = 'btn-gear';
   gearBtn.className = 'np-play';
   gearBtn.style.cssText = 'font-size:0.75rem;';
   gearBtn.innerHTML = '⚙️';
-  gearBtn.title = '语音设置';
+  gearBtn.title = 'DJ 声音设置';
   btnSpeaker.insertAdjacentElement('afterend', gearBtn);
 
-  // Modal overlay
   const overlay = document.createElement('div');
   overlay.id = 'voice-modal-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.7);display:none;align-items:flex-end;justify-content:center;';
@@ -353,83 +341,20 @@ function buildVoiceModal() {
   
   sheet.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <div style="font-weight:600;font-size:0.95rem;">🎤 语音设置 (浏览器内置)</div>
+      <div style="font-weight:600;font-size:0.95rem;">🎤 DJ 声音 (云端神经网络)</div>
       <button id="btn-close-modal" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:1.2rem;padding:4px 8px;">✕</button>
     </div>
-    <div style="margin-bottom:14px;">
-      <div style="font-size:0.72rem;color:var(--text3);margin-bottom:6px;">选择 DJ 声音 (中文男声优先)</div>
-      <div id="voice-btn-group" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+    <div style="margin-bottom:14px;padding:12px;background:var(--surfaceAlt);border-radius:12px;border:1px solid var(--border);">
+      <div style="font-size:0.78rem;color:var(--accent);font-weight:500;margin-bottom:4px;">🎙 当前使用：Yunyang (男声)</div>
+      <div style="font-size:0.68rem;color:var(--text3);line-height:1.5;">
+        NearEar 使用微软云端神经网络语音合成，生成自然的男声 DJ 语音。温暖、磁性，如深夜电台主播。
+      </div>
     </div>
-    <div style="margin-bottom:12px;">
-      <div style="font-size:0.72rem;color:var(--text3);margin-bottom:4px;">语速 <span id="rate-label">稍慢 (0.85)</span></div>
-      <input type="range" id="rate-slider" min="0.5" max="1.5" value="0.85" step="0.05" style="width:100%;accent-color:var(--accent);">
-    </div>
-    <div style="margin-bottom:16px;">
-      <div style="font-size:0.72rem;color:var(--text3);margin-bottom:4px;">音调 <span id="pitch-label">偏低 (0.9)</span></div>
-      <input type="range" id="pitch-slider" min="0.5" max="1.5" value="0.9" step="0.05" style="width:100%;accent-color:var(--accent);">
-    </div>
-    <button id="btn-test-voice" style="width:100%;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:0.85rem;cursor:pointer;">试听当前声音</button>
+    <button id="btn-test-voice" style="width:100%;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:0.85rem;cursor:pointer;">试听 DJ 声音</button>
   `;
   
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
-
-  // Build voice buttons
-  function renderVoiceChips() {
-    const voiceGroup = sheet.querySelector('#voice-btn-group');
-    voiceGroup.innerHTML = '';
-    const allVoices = synth.getVoices();
-    browserVoices = allVoices;
-    const zhVoices = allVoices.filter(v => v.lang.startsWith('zh'));
-    const displayVoices = zhVoices.length > 0 ? zhVoices : allVoices.slice(0, 12);
-
-    // If no voice selected yet, auto-pick
-    if (!selectedVoiceURI && displayVoices.length > 0) {
-      const pref = displayVoices.find(v => v.lang==='zh-CN' && !v.name.includes('Xiaoxiao'))
-        || displayVoices[0];
-      selectedVoiceURI = pref.voiceURI;
-    }
-
-    displayVoices.forEach(v => {
-      const chip = document.createElement('button');
-      chip.className = 'voice-chip';
-      chip.style.cssText = 'padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surfaceAlt);color:var(--text2);font-size:0.7rem;cursor:pointer;transition:all 0.2s;white-space:nowrap;';
-      chip.textContent = v.name.split(' ').slice(0,2).join(' ') + ' · ' + v.lang;
-      chip.title = v.name;
-      if (v.voiceURI === selectedVoiceURI) {
-        chip.style.borderColor = 'var(--accent)';
-        chip.style.color = 'var(--accent)';
-        chip.style.boxShadow = '0 0 8px var(--accentGlow)';
-      }
-      chip.addEventListener('click', () => {
-        selectedVoiceURI = v.voiceURI;
-        renderVoiceChips();
-      });
-      voiceGroup.appendChild(chip);
-    });
-  }
-  renderVoiceChips();
-  synth.onvoiceschanged = () => renderVoiceChips();
-
-  // Rate slider (0.5...1.5, default 0.85)
-  const rateSlider = sheet.querySelector('#rate-slider');
-  const rateLabel = sheet.querySelector('#rate-label');
-  rateSlider.addEventListener('input', () => {
-    const v = parseFloat(rateSlider.value);
-    selectedRate = v;
-    const desc = v < 0.7 ? '很慢' : v < 0.9 ? '稍慢' : v < 1.1 ? '正常' : '稍快';
-    rateLabel.textContent = desc + ' (' + v.toFixed(2) + ')';
-  });
-
-  // Pitch slider (0.5...1.5, default 0.9)
-  const pitchSlider = sheet.querySelector('#pitch-slider');
-  const pitchLabel = sheet.querySelector('#pitch-label');
-  pitchSlider.addEventListener('input', () => {
-    const v = parseFloat(pitchSlider.value);
-    selectedPitch = v;
-    const desc = v < 0.85 ? '低沉' : v < 0.95 ? '偏低' : v < 1.05 ? '正常' : '偏高';
-    pitchLabel.textContent = desc + ' (' + v.toFixed(2) + ')';
-  });
 
   // Test button
   sheet.querySelector('#btn-test-voice').addEventListener('click', () => {
@@ -442,7 +367,7 @@ function buildVoiceModal() {
   // Toggle modal
   gearBtn.addEventListener('click', () => {
     overlay.style.display = 'flex';
-    setTimeout(() => { sheet.style.transform = 'translateY(0)'; renderVoiceChips(); }, 10);
+    setTimeout(() => { sheet.style.transform = 'translateY(0)'; }, 10);
   });
   
   sheet.style.transform = 'translateY(100%)';
