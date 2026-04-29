@@ -3,14 +3,13 @@ const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
 const path = require('path');
-const { MsEdgeTTS } = require('edge-tts-node');
 
 const app = express();
-const edgeTTS = new MsEdgeTTS({});
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
 
 // DeepSeek API 客户端（兼容 OpenAI SDK）
 const client = new OpenAI({
@@ -300,49 +299,6 @@ app.post('/api/next-song', async (req, res) => {
     }
 });
 
-// ==================== EDGE TTS ENDPOINT ====================
-app.post('/api/tts', async (req, res) => {
-    try {
-        const { text } = req.body;
-        if (!text) return res.status(400).json({ error: 'text 为必填项' });
-
-        console.log(`[TTS] "${text.slice(0, 50)}..."`);
-
-        // Use male voice zh-CN-YunyangNeural (warm, broadcaster-style)
-        // Fallback: zh-CN-YunjianNeural also male
-        const mp3Buffer = await edgeTTS.toBuffer(text, {
-            voice: 'zh-CN-YunyangNeural',
-            rate: '-15%',      // slightly slower for DJ style
-            pitch: '-3Hz',     // slightly deeper, warm tone
-        });
-
-        res.set({
-            'Content-Type': 'audio/mpeg',
-            'Content-Length': mp3Buffer.length,
-            'Cache-Control': 'no-cache',
-        });
-        res.send(mp3Buffer);
-    } catch (err) {
-        console.error('[TTS] Error:', err.message);
-        // Try fallback voice
-        try {
-            const { text } = req.body;
-            const mp3Buffer = await edgeTTS.toBuffer(text, {
-                voice: 'zh-CN-YunjianNeural',
-                rate: '-15%',
-                pitch: '-3Hz',
-            });
-            res.set({
-                'Content-Type': 'audio/mpeg',
-                'Content-Length': mp3Buffer.length,
-                'Cache-Control': 'no-cache',
-            });
-            res.send(mp3Buffer);
-        } catch (e2) {
-            res.status(500).json({ error: 'TTS synthesis failed', details: err.message });
-        }
-    }
-});
 
 // ==================== FIXED MUSIC SEARCH ====================
 // Override searchMusicWithFallback to aggressively prefer Archive.org full songs
@@ -359,7 +315,7 @@ searchMusicWithFallback = async function (query) {
     }
 
     // Step 2: Try simplified/expanded queries on Archive
-    const simplified = query.replace(/[，,.\-!！？?—…"」』】）\)\s]+/g, ' ').trim();
+    const simplified = query.replace(/[，,.\-!！？?—…"」』】）)\s]+/g, ' ').trim();
     if (simplified !== query && simplified.length > 1) {
         results = await searchFullSongs(simplified, 8);
         if (results.length > 0) {
@@ -400,7 +356,11 @@ searchMusicWithFallback = async function (query) {
 
 if (require.main === module) {
     const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => console.log(`\n  📻 NearEar 深夜电台已上线\n  🎧 http://localhost:${PORT}\n`));
+    app.listen(PORT, () => {
+        console.log(`\n  📻 NearEar 深夜电台已上线`);
+        console.log(`  🎧 http://localhost:${PORT}`);
+        console.log(`  🎙️  TTS: 浏览器 SpeechSynthesis (无需服务器)\n`);
+    });
 }
 
 module.exports = app;
