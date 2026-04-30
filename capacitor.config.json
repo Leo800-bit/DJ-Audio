@@ -1,12 +1,7 @@
 {
   "appId": "com.nearear.app",
   "appName": "NearEar",
-  "webDir": "public",
-  "server": {
-    "url": "http://192.168.120.43:3000",
-    "cleartext": true,
-    "allowNavigation": ["*"]
-  },
+  "webDir": "www",
   "android": {
     "allowMixedContent": true
   }

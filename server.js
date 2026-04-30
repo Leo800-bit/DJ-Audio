@@ -200,6 +200,9 @@ const tools = [{
     },
 }];
 
+// ── Ping endpoint (used by APK setup modal to test server reachability) ──
+app.get('/api/ping', (req, res) => res.send('pong'));
+
 // Routes
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
@@ -356,9 +359,27 @@ searchMusicWithFallback = async function (query) {
 
 if (require.main === module) {
     const PORT = process.env.PORT || 3000;
+    const os = require('os');
+
     app.listen(PORT, () => {
+        // Get LAN IPs for the APK setup modal
+        const interfaces = os.networkInterfaces();
+        const ips = [];
+        for (const name of Object.keys(interfaces)) {
+            for (const iface of interfaces[name]) {
+                if (iface.family === 'IPv4' && !iface.internal) {
+                    ips.push(`http://${iface.address}:${PORT}`);
+                }
+            }
+        }
+
         console.log(`\n  📻 NearEar 深夜电台已上线`);
         console.log(`  🎧 http://localhost:${PORT}`);
+        if (ips.length > 0) {
+            console.log(`  📱 手机连接地址:`);
+            ips.forEach(ip => console.log(`     ${ip}`));
+            console.log(`  📌 在手机上打开 APK → 输入上面的地址即可连接`);
+        }
         console.log(`  🎙️  TTS: 浏览器 SpeechSynthesis (无需服务器)\n`);
     });
 }

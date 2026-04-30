@@ -233,6 +233,89 @@ const btnSpeaker=$('btn-speaker');
 let chatHistory=[], isPlaying=false, waveInt=null, lastQuery=null, playedIds=[], curId=null, busy=false, dark=true;
 let ttsEnabled=true, ttsSpeaking=false, pendingMusic=null;
 
+// ── Server Configuration ──
+let API_BASE_URL = localStorage.getItem('nearear_server_url') || '';
+function getApiUrl(path) {
+  return API_BASE_URL ? API_BASE_URL + path : path;
+}
+
+// ── Server Setup Modal (for APK/offline mode) ──
+function checkServerSetup() {
+  if (API_BASE_URL) return;
+  // Determine if we're loaded from a file:// or local APK (not a live server)
+  if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '') {
+    showServerSetupModal();
+  }
+}
+
+function showServerSetupModal() {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;';
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface);color:var(--text);width:88%;max-width:380px;border-radius:20px;padding:28px 20px;border:1px solid var(--border);text-align:center;';
+  card.innerHTML = `
+    <div style="font-size:2rem;margin-bottom:8px;">📡</div>
+    <div style="font-weight:600;font-size:1rem;margin-bottom:6px;">连接到服务器</div>
+    <div style="font-size:0.72rem;color:var(--text2);margin-bottom:16px;line-height:1.5;">
+      NearEar 需要连接到后端服务器才能工作。<br>
+      请先在电脑上启动服务器，然后输入其地址。
+    </div>
+    <div style="background:var(--surfaceAlt);border-radius:12px;padding:12px;margin-bottom:16px;text-align:left;font-size:0.68rem;color:var(--text2);line-height:1.6;">
+      <div style="font-weight:500;color:var(--text);margin-bottom:4px;">📋 如何获取地址：</div>
+      1. 在电脑上运行 <code style="background:var(--border);padding:1px 6px;border-radius:4px;">node server.js</code>
+      2. 记下终端显示的 IP（如 <code style="background:var(--border);padding:1px 6px;border-radius:4px;">http://192.168.x.x:3000</code>）
+      3. 输入到下方，点击连接
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="setup-url" type="url" placeholder="http://192.168.x.x:3000" value="" style="flex:1;padding:10px 12px;border-radius:12px;border:1px solid var(--borderFocus);background:var(--surface);color:var(--text);font-size:0.85rem;outline:none;">
+      <button id="setup-connect" style="padding:10px 18px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:0.85rem;cursor:pointer;white-space:nowrap;">连接</button>
+    </div>
+    <div style="margin-top:12px;font-size:0.65rem;color:var(--text3);">
+      提示：手机和电脑需要在<strong>同一个 WiFi</strong> 下
+    </div>
+  `;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  const input = card.querySelector('#setup-url');
+  const btn = card.querySelector('#setup-connect');
+  // Focus input
+  setTimeout(() => input.focus(), 300);
+
+  function doConnect() {
+    let url = input.value.trim().replace(/\/+$/, '');
+    if (!url) { input.style.borderColor = 'var(--accent)'; return; }
+    if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'http://' + url;
+    // Test connection
+    btn.textContent = '检测中…';
+    btn.disabled = true;
+    fetch(url + '/api/ping', { method: 'GET', mode: 'cors' })
+      .then(r => { if (!r.ok) throw new Error(); return r.text(); })
+      .then(() => {
+        API_BASE_URL = url;
+        localStorage.setItem('nearear_server_url', url);
+        overlay.remove();
+        addBubble('dj', '📡 已连接到服务器！来聊点什么吧 🎙');
+        userInput.focus();
+      })
+      .catch(() => {
+        btn.textContent = '连接失败，重试';
+        btn.disabled = false;
+        input.style.borderColor = 'var(--accent)';
+        input.placeholder = '无法连接，检查地址和网络';
+      });
+  }
+
+  btn.addEventListener('click', doConnect);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') doConnect(); });
+}
+
+// Check server setup after a short delay (after welcome bubble)
+setTimeout(checkServerSetup, 600);
+
+// ── Ping endpoint helper for server setup ──
+// (server.js exposes GET /api/ping returning "pong")
+
 // ── TTS Engine: Pure browser SpeechSynthesis (no native plugins, no server) ──
 // Works on all Android WebViews via Google TTS engine
 let ttsUtterance = null;
@@ -564,7 +647,7 @@ $('btn-prev').addEventListener('click',()=>{if(audio.src&&audio.duration){audio.
 
 async function fetchNextAndPlay(){
   try{
-    const r=await fetch('/api/next-song',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({previousQuery:lastQuery||'',excludeTrackIds:playedIds.slice(-15)})});
+    const r=await fetch(getApiUrl('/api/next-song'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({previousQuery:lastQuery||'',excludeTrackIds:playedIds.slice(-15)})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const d=await r.json();
     if(d.music&&d.music.previewUrl) playMusicDirect(d.music);
@@ -580,6 +663,13 @@ $('theme-btn').addEventListener('click',()=>{dark=!dark;updateTheme()});
 // ── Send message ──
 async function sendMsg(){
   if(busy)return; const t=userInput.value.trim(); if(!t)return;
+
+  // Show setup modal if no server URL configured (APK mode)
+  if (!API_BASE_URL && (location.protocol === 'file:' || location.hostname === '')) {
+    showServerSetupModal();
+    return;
+  }
+
   busy=true; userInput.disabled=true; sendBtn.disabled=true; userInput.value=''; userInput.placeholder='…';
   addBubble('user',t); chatHistory.push({role:'user',content:t}); addTyping();
 
@@ -587,7 +677,7 @@ async function sendMsg(){
   stopTTS();
 
   try{
-    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:chatHistory})});
+    const r=await fetch(getApiUrl('/api/chat'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:chatHistory})});
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||e.details||'HTTP '+r.status) }
     const d=await r.json();
     const msg=d.message||'📡 信号波动…';
